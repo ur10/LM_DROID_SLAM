@@ -1,136 +1,61 @@
-# DROID-SLAM-LM 
+# LM-Droid SLAM
+
+LM-Droid SLAM is a modified version of the state-of-the-art DROID-SLAM system that replaces the dense bundle adjustment (DBA) layers with a Levenberg–Marquardt (LM) solver. This integration aims to enhance accuracy and stability in camera pose and inverse depth estimation by leveraging the robustness of the LM algorithm, while keeping the overall system fully differentiable.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Motivation](#motivation)
+- [Methodology](#methodology)
+- [Experiments and Evaluation](#experiments-and-evaluation)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Limitations and Future Work](#limitations-and-future-work)
+- [Citation](#citation)
+- [Contact](#contact)
 
 
-<!-- <center><img src="misc/DROID.png" width="640" style="center"></center> -->
 
-
-[![IMAGE ALT TEXT HERE](misc/screenshot.png)](https://www.youtube.com/watch?v=GG78CSlSHSA)
+## Overview
 
 
 
-[DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras](https://arxiv.org/abs/2108.10869)  
-Zachary Teed and Jia Deng MODIFIED BY PARTHH AND UTKARSH 
+![Screenshot from 2025-02-03 10-35-25](https://github.com/user-attachments/assets/4a74a07d-90eb-4183-a9e9-caafc2aadac0)
 
-```
-@article{teed2021droid,
-  title={{DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras}},
-  author={Teed, Zachary and Deng, Jia},
-  journal={Advances in neural information processing systems},
-  year={2021}
-}
-```
+LM-Droid SLAM modifies DROID-SLAM by replacing the learned DBA layers—which use Schur complement and Gauss–Newton optimization—with an LM solver. The LM algorithm, known for its adaptive behavior and robustness even with poor initial estimates, refines camera poses and inverse depth estimates based on the same reprojection error framework as the original system.
 
-**Initial Code Release:** This repo currently provides a single GPU implementation of our monocular, stereo, and RGB-D SLAM systems. It currently contains demos, training, and evaluation scripts. 
+## Motivation
 
+- **Enhanced Robustness:** LM’s adaptive combination of gradient descent and Gauss–Newton makes it more stable in challenging optimization scenarios.
+- **Efficiency Analysis:** Detailed timing analyses reveal that while the DBA layer is a performance bottleneck (~7.5% of total time), the graph aggregation and update operators account for the bulk of processing time. This motivates exploration of more efficient architectural alternatives.
+- **Differentiable Integration:** Maintaining an end-to-end differentiable pipeline, the LM solver is integrated in a way that supports backpropagation, paving the way for potential end-to-end training improvements.
 
-## Requirements
+## Methodology
 
-To run the code you will need ...
-* **Inference:** Running the demos will require a GPU with at least 11G of memory. 
+- **LM Solver Implementation:**  
+  The project replaces the DBA layer with an LM solver that directly minimizes the reprojection error. The solver computes the necessary Jacobian matrices and dynamically adjusts the damping factor to ensure stable convergence.
 
-* **Training:** Training requires a GPU with at least 24G of memory. We train on 4 x RTX-3090 GPUs.
+- **Integration into DROID-SLAM:**  
+  Only the update operator is modified to incorporate the LM-based optimization. The remaining network components—such as the ConvGRU block, feature extraction, and context update modules—remain unchanged to isolate the impact of the LM solver.
 
-## Getting Started
-1. Clone the repo using the `--recursive` flag
-```Bash
-git clone --recursive https://github.com/princeton-vl/DROID-SLAM.git
-```
+- **Optimization Approach:**  
+  While the original DBA layer leverages the Schur complement method for efficient solution, the LM solver uses an iterative process that adapts between gradient descent and Gauss–Newton methods depending on local curvature.
 
-2. Creating a new anaconda environment using the provided .yaml file. Use `environment_novis.yaml` to if you do not want to use the visualization
-```Bash
-conda env create -f environment.yaml
-pip install evo --upgrade --no-binary evo
-pip install gdown
-```
+## Experiments and Evaluation
 
-3. Compile the extensions (takes about 10 minutes)
-```Bash
-python setup.py install
-```
+- **Datasets:**  
+  The system is evaluated on the TartanAir dataset, particularly on sequences such as MH001 and MHOO2, which present a range of challenging synthetic environments.
+
+- **Performance Metrics:**  
+  The primary metric is Absolute Trajectory Error (ATE). Experiments showed:
+  - DROID-SLAM with DBA: ATE of approximately 0.05 m and 0.04 m.
+  - LM-Solver based approach (without retraining the full network): Degraded ATE values of 0.27 m and 0.15 m.
+
+- **Timing Analysis:**  
+  Detailed cProfiler experiments on an abandoned factory scene reveal:
+  - DBA layer takes about 7.3 seconds (7.5% of total runtime).
+  - Graph aggregation and the update operator constitute approximately 30.7% and 35% of the total processing time respectively.
+  
+  These measurements highlight significant opportunities to optimize the context aggregation and update processes further.
 
 
-## Demos
-
-1. Download the model from google drive: [droid.pth](https://drive.google.com/file/d/1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh/view?usp=sharing)
-
-2. Download some sample videos using the provided script.
-```Bash
-./tools/download_sample_data.sh
-```
-
-Run the demo on any of the samples (all demos can be run on a GPU with 11G of memory). While running, press the "s" key to increase the filtering threshold (= more points) and "a" to decrease the filtering threshold (= fewer points). To save the reconstruction with full resolution depth maps use the `--reconstruction_path` flag.
-
-
-```Python
-python demo.py --imagedir=data/abandonedfactory --calib=calib/tartan.txt --stride=2 --solver=lm
-```
-
-```Python
-python demo.py --imagedir=data/sfm_bench/rgb --calib=calib/eth.txt --solver=lm
-```
-
-
-```Python
-python demo.py --imagedir=data/mav0/cam0/data --calib=calib/euroc.txt --t0=150 --solver=lm
-```
-
-```Python
-python demo.py --imagedir=data/rgbd_dataset_freiburg3_cabinet/rgb --calib=calib/tum3.txt --solver=lm
-```
-
-
-**Running on your own data:** All you need is a calibration file. Calibration files are in the form 
-```
-fx fy cx cy [k1 k2 p1 p2 [ k3 [ k4 k5 k6 ]]]
-```
-with parameters in brackets optional.
-
-## Evaluation
-We provide evaluation scripts for TartanAir, EuRoC, and TUM. EuRoC and TUM can be run on a 1080Ti. The TartanAir and ETH will require 24G of memory.
-
-### TartanAir (Mono + Stereo)
-Download the [TartanAir](https://theairlab.org/tartanair-dataset/) dataset using the script `thirdparty/tartanair_tools/download_training.py` and put them in `datasets/TartanAir`
-```Bash
-./tools/validate_tartanair.sh --plot_curve            # monocular eval
-./tools/validate_tartanair.sh --plot_curve  --stereo  # stereo eval
-```
-
-### EuRoC (Mono + Stereo)
-Download the [EuRoC](https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets) sequences (ASL format) and put them in `datasets/EuRoC`
-```Bash
-./tools/evaluate_euroc.sh                             # monocular eval
-./tools/evaluate_euroc.sh --stereo                    # stereo eval
-```
-
-### TUM-RGBD (Mono)
-Download the fr1 sequences from [TUM-RGBD](https://vision.in.tum.de/data/datasets/rgbd-dataset/download) and put them in `datasets/TUM-RGBD`
-```Bash
-./tools/evaluate_tum.sh                               # monocular eval
-```
-
-### ETH3D (RGB-D)
-Download the [ETH3D](https://www.eth3d.net/slam_datasets) dataset
-```Bash
-./tools/evaluate_eth3d.sh                             # RGB-D eval
-```
-
-## Training
-
-First download the TartanAir dataset. The download script can be found in `thirdparty/tartanair_tools/download_training.py`. You will only need the `rgb` and `depth` data.
-
-```
-python download_training.py --rgb --depth
-```
-
-You can then run the training script. We use 4x3090 RTX GPUs for training which takes approximatly 1 week. If you use a different number of GPUs, adjust the learning rate accordingly.
-
-**Note:** On the first training run, covisibility is computed between all pairs of frames. This can take several hours, but the results are cached so that future training runs will start immediately. 
-
-
-```
-python train.py --datapath=<path to tartanair> --gpus=4 --lr=0.00025
-```
-
-
-## Acknowledgements
-Data from [TartanAir](https://theairlab.org/tartanair-dataset/) was used to train our model. We additionally use evaluation tools from [evo](https://github.com/MichaelGrupp/evo) and [tartanair_tools](https://github.com/castacks/tartanair_tools).
